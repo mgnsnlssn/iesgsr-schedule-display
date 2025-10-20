@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8">
+  <title>Schema-display för biblioteket</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- CSV parser library to fetch and read your Google Sheet -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
+  <!-- CSS: Styles and layout -->
+  <style>
+    body {
+      margin: 0;
+      font-family: "Open Sans", sans-serif;
+      background-color: #102d69; /* Dark blue background */
+      color: white;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 0.5rem;
+    }
+
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 0.3rem;
+    }
+
+    .time {
+      font-size: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .columns {
+      display: flex;
+      width: 100%;
+      max-width: 1600px;
+      justify-content: space-between;
+      gap: 0.5rem;
+    }
+
+    .year-column {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    /* Background colors per year group */
+    .year-7 .group { background-color: #d9e6b1; color: #102d69; }
+    .year-8 .group { background-color: #fff7b2; color: #102d69; }
+    .year-9 .group { background-color: #00a0df; color: #102d69; }
+
+    .group {
+      padding: 0.5rem;
+      border-radius: 0.75rem;
+      font-size: 0.85rem;
+    }
+
+    .group-header {
+      font-weight: bold;
+      margin-bottom: 0.2rem;
+    }
+
+    .lesson {
+      margin: 0.2rem 0;
+    }
+
+    .label {
+      font-weight: bold;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>📚 Klassvis Schema</h1>
+  <div class="time" id="clock">--:--</div>
+
+  <!-- Three columns for each year group -->
+  <div class="columns">
+    <div class="year-column year-7" id="year7"></div>
+    <div class="year-column year-8" id="year8"></div>
+    <div class="year-column year-9" id="year9"></div>
+  </div>
+
+  <script>
+    let scheduleData = []; // Will hold all rows from the CSV
+
+    // Map Swedish weekdays to numbers (needed for matching today's lessons)
+    const dayMap = { "Sön": 0, "Mån": 1, "Tis": 2, "Ons": 3, "Tor": 4, "Fre": 5, "Lör": 6 };
+
+    // Only these classes are shown
+    const allowedGroups = ["7A", "7B", "7C", "7D", "8A", "8B", "8C", "8D", "9A", "9B", "9C", "9D", "9E"];
+
+    // Converts "815" to { hour: 8, minute: 15 }
+    function parseStartTime(val) {
+      const str = val.toString().padStart(4, '0');
+      return {
+        hour: parseInt(str.substring(0, 2)),
+        minute: parseInt(str.substring(2))
+      };
+    }
+
+    // Determines year from group name
+    function getYear(groupName) {
+      if (groupName.startsWith("7")) return 7;
+      if (groupName.startsWith("8")) return 8;
+      return 9;
+    }
+
+    // Format time object to HH:MM
+    function formatTime(date) {
+      return date.toTimeString().slice(0, 5);
+    }
+
+    // Calculate how many minutes left in current lesson
+    function minutesLeft(end) {
+      const now = new Date();
+      const diff = Math.max(0, Math.round((end - now) / 60000));
+      return diff;
+    }
+
+    // Build the visual schedule
+    function renderSchedule() {
+      const now = new Date();
+      const today = now.getDay();
+
+      // Get the HTML containers for each year
+      const containers = {
+        7: document.getElementById("year7"),
+        8: document.getElementById("year8"),
+        9: document.getElementById("year9")
+      };
+
+      // Clear previous content
+      containers[7].innerHTML = "";
+      containers[8].innerHTML = "";
+      containers[9].innerHTML = "";
+
+      // Group lessons by class (e.g., 7A, 9D...)
+      const grouped = {};
+      scheduleData.forEach(lesson => {
+        if (dayMap[lesson.day] !== today) return; // Skip other days
+        if (!lesson.group || !allowedGroups.includes(lesson.group)) return;
+
+        // Parse time and calculate start/end time
+        const { hour, minute } = parseStartTime(lesson.starttime);
+        const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, minute);
+        const end = new Date(start.getTime() + parseInt(lesson.length) * 60000);
+
+        if (!grouped[lesson.group]) grouped[lesson.group] = [];
+        grouped[lesson.group].push({ ...lesson, start, end });
+      });
+
+      // Loop through all groups and render
+      Object.entries(grouped).forEach(([group, lessons]) => {
+        // Determine ongoing and upcoming lessons
+        const current = lessons.find(l => now >= l.start && now <= l.end);
+        const upcoming = lessons.find(l => l.start > now && (l.start - now) <= 20 * 60000);
+        const last = lessons[lessons.length - 1];
+        const isFinished = last && now > last.end;
+
+        const wrapper = document.createElement("div");
+        wrapper.className = "group";
+
+        const header = document.createElement("div");
+        header.className = "group-header";
+        header.textContent = group;
+        wrapper.appendChild(header);
+
+        const nowEl = document.createElement("p");
+        nowEl.className = "lesson";
+
+        // Decide what to show under "Nu:"
+        if (isFinished) {
+          nowEl.innerHTML = `<span class="label">Nu:</span> ✅ Klart för idag`;
+        } else if (current) {
+          nowEl.innerHTML = `<span class="label">Nu:</span> 🧑‍🏫 ${current.subject} med ${current.teacher} – ${current.room} (startade ${formatTime(current.start)}, ${minutesLeft(current.end)} min kvar)`;
+        } else {
+          nowEl.innerHTML = `<span class="label">Nu:</span> 🛋 Rast`;
+        }
+        wrapper.appendChild(nowEl);
+
+        // Show the next class if within 20 minutes
+        const nextEl = document.createElement("p");
+        nextEl.className = "lesson";
+        nextEl.innerHTML = `<span class="label">Nästa:</span> ${upcoming ? `📌 ${upcoming.subject} med ${upcoming.teacher} – ${upcoming.room} @ ${formatTime(upcoming.start)}` : `–`}`;
+        wrapper.appendChild(nextEl);
+
+        // Add the full group box to the correct year column
+        const year = getYear(group);
+        containers[year].appendChild(wrapper);
+      });
+    }
+
+    // Display live clock
+    function updateClock() {
+      const now = new Date();
+      document.getElementById("clock").textContent = now.toTimeString().slice(0, 5);
+    }
+
+    // Fetch schedule data from Google Sheet CSV
+    function loadSchedule() {
+      Papa.parse("https://docs.google.com/spreadsheets/d/1yIjImgvJGa2b2lDWepFUXnt0xEqSSGw6gVtTnyiiWsI/gviz/tq?tqx=out:csv&sheet=schedule_data_ht25", {
+        download: true,
+        header: true,
+        complete: function(results) {
+          scheduleData = results.data;
+          renderSchedule();
+        }
+      });
+    }
+
+    // Run every 60 seconds to stay updated
+    setInterval(() => {
+      updateClock();
+      loadSchedule();
+    }, 60000);
+
+    // Run once on page load
+    updateClock();
+    loadSchedule();
+  </script>
+</body>
+</html>
